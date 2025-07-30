@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>PDF vers Excel</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h2>📄 Importer un PDF et l’exporter en Excel</h2>
+
+  <input type="file" id="pdfFile" accept="application/pdf" />
+  <button onclick="extractPDF()">Extraire le tableau</button>
+  <button onclick="downloadExcel()">Télécharger Excel</button>
+
+  <pre id="output" style="white-space: pre-wrap; background: #f0f0f0; padding: 1em; max-height: 400px; overflow-y: auto;"></pre>
+
+  <script>
+    let extractedTable = [];
+
+    async function extractPDF() {
+      const fileInput = document.getElementById('pdfFile');
+      const file = fileInput.files[0];
+      if (!file) return alert("Veuillez sélectionner un fichier PDF.");
+
+      const reader = new FileReader();
+      reader.onload = async function () {
+        const typedArray = new Uint8Array(this.result);
+        const pdf = await pdfjsLib.getDocument({ data: typedArray }).promise;
+        let lines = [];
+
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          const page = await pdf.getPage(pageNum);
+          const content = await page.getTextContent();
+          let items = content.items;
+
+          // Grouper les textes par lignes (Y position)
+          let rowsMap = {};
+          items.forEach(item => {
+            const y = Math.floor(item.transform[5]);
+            const x = item.transform[4];
+            const text = item.str.trim();
+            if (!rowsMap[y]) rowsMap[y] = [];
+            rowsMap[y].push({ x, text });
+          });
+
+          // Tri des lignes et colonnes
+          const sortedYs = Object.keys(rowsMap).sort((a, b) => b - a);
+          for (let y of sortedYs) {
+            const row = rowsMap[y]
+              .sort((a, b) => a.x - b.x)
+              .map(cell => cell.text)
+              .filter(cell => cell !== ""); // supprimer les vides
+            if (row.length > 0) lines.push(row);
+          }
+        }
+
+        // Nettoyage final : retirer les lignes bruitées
+        extractedTable = lines.filter(row => row.length >= 3);
+
+        document.getElementById('output').textContent = JSON.stringify(extractedTable, null, 2);
+        alert("✅ Extraction terminée !");
+      };
+
+      reader.readAsArrayBuffer(file);
+    }
+
+    function downloadExcel() {
+      if (extractedTable.length === 0) {
+        return alert("Aucun tableau extrait.");
+      }
+
+      const worksheet = XLSX.utils.aoa_to_sheet(extractedTable);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Feuille1");
+
+      XLSX.writeFile(workbook, "tableau_extrait.xlsx");
+    }
+  </script>
+</body>
+</html>
