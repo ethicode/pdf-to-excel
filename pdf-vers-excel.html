@@ -2,73 +2,223 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PDF vers Excel</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background: #f9f9fb;
+      color: #333;
+      padding: 20px;
+    }
+
+    h2 {
+      text-align: center;
+      color: #2c3e50;
+      font-weight: 700;
+      margin-bottom: 20px;
+    }
+
+    #pdfFile {
+      display: block;
+      margin: 0 auto 20px auto;
+      padding: 10px;
+      font-size: 1rem;
+    }
+
+    #pdfViewer {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 16px;
+    }
+
+    .page-container {
+      border: 2px solid transparent;
+      border-radius: 8px;
+      background: white;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      transition: all 0.3s ease;
+      padding: 10px;
+      cursor: pointer;
+    }
+
+    .page-container:hover {
+      transform: scale(1.02);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    }
+
+    .page-container.selected {
+      border-color: #27ae60;
+    }
+
+    canvas {
+      display: block;
+      margin: 0 auto;
+      border-radius: 4px;
+    }
+
+    .button-container {
+      text-align: center;
+      margin-top: 30px;
+    }
+
+    button {
+      background-color: #3498db;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      margin: 10px;
+      font-size: 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+
+    button:hover:not(:disabled) {
+      background-color: #2980b9;
+    }
+
+    #output {
+      background-color: #ecf0f1;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 30px auto;
+      max-width: 800px;
+      max-height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      font-size: 0.95rem;
+      line-height: 1.4;
+    }
+
+    @media (max-width: 600px) {
+      button {
+        width: 90%;
+        margin: 10px auto;
+        display: block;
+      }
+    }
+  </style>
 </head>
 <body>
-  <h2>📄 Importer un PDF et l’exporter en Excel</h2>
+  <h2>📄 Importer un PDF → Sélectionner une page → Extraire → Télécharger Excel</h2>
 
   <input type="file" id="pdfFile" accept="application/pdf" />
-  <button onclick="extractPDF()">Extraire le tableau</button>
-  <button onclick="downloadExcel()">Télécharger Excel</button>
 
-  <pre id="output" style="white-space: pre-wrap; background: #f0f0f0; padding: 1em; max-height: 400px; overflow-y: auto;"></pre>
+  <div id="pdfViewer"></div>
+
+  <div class="button-container">
+    <button id="extractBtn" onclick="extractTable()" disabled>🧠 Extraire le tableau</button>
+    <button onclick="downloadExcel()">💾 Télécharger Excel</button>
+  </div>
+
+  <pre id="output"></pre>
 
   <script>
+    let pdfDoc = null;
+    let selectedPage = null;
     let extractedTable = [];
 
-    async function extractPDF() {
-      const fileInput = document.getElementById('pdfFile');
-      const file = fileInput.files[0];
-      if (!file) return alert("Veuillez sélectionner un fichier PDF.");
+    document.getElementById('pdfFile').addEventListener('change', async function () {
+      const file = this.files[0];
+      if (!file) return;
 
       const reader = new FileReader();
       reader.onload = async function () {
         const typedArray = new Uint8Array(this.result);
-        const pdf = await pdfjsLib.getDocument({ data: typedArray }).promise;
-        let lines = [];
-
-        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-          const page = await pdf.getPage(pageNum);
-          const content = await page.getTextContent();
-          let items = content.items;
-
-          // Grouper les textes par lignes (Y position)
-          let rowsMap = {};
-          items.forEach(item => {
-            const y = Math.floor(item.transform[5]);
-            const x = item.transform[4];
-            const text = item.str.trim();
-            if (!rowsMap[y]) rowsMap[y] = [];
-            rowsMap[y].push({ x, text });
-          });
-
-          // Tri des lignes et colonnes
-          const sortedYs = Object.keys(rowsMap).sort((a, b) => b - a);
-          for (let y of sortedYs) {
-            const row = rowsMap[y]
-              .sort((a, b) => a.x - b.x)
-              .map(cell => cell.text)
-              .filter(cell => cell !== ""); // supprimer les vides
-            if (row.length > 0) lines.push(row);
-          }
-        }
-
-        // Nettoyage final : retirer les lignes bruitées
-        extractedTable = lines.filter(row => row.length >= 3);
-
-        document.getElementById('output').textContent = JSON.stringify(extractedTable, null, 2);
-        alert("✅ Extraction terminée !");
+        pdfDoc = await pdfjsLib.getDocument({ data: typedArray }).promise;
+        displayPDFPages(pdfDoc);
       };
-
       reader.readAsArrayBuffer(file);
+    });
+
+    function displayPDFPages(pdf) {
+      const viewer = document.getElementById('pdfViewer');
+      viewer.innerHTML = '';
+      selectedPage = null;
+      document.getElementById('extractBtn').disabled = true;
+
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const pageContainer = document.createElement('div');
+        pageContainer.className = 'page-container';
+        pageContainer.dataset.pageNumber = i;
+
+        const canvas = document.createElement('canvas');
+        pageContainer.appendChild(canvas);
+
+        const label = document.createElement('div');
+        label.textContent = `Page ${i}`;
+        label.style.marginTop = '8px';
+        label.style.fontWeight = '600';
+        label.style.color = '#2c3e50';
+        pageContainer.appendChild(label);
+
+        viewer.appendChild(pageContainer);
+
+        pdf.getPage(i).then(function (page) {
+          const viewport = page.getViewport({ scale: 1.2 });
+          const context = canvas.getContext('2d');
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+          page.render({ canvasContext: context, viewport: viewport });
+        });
+
+        // Sélection de page
+        pageContainer.onclick = function () {
+          document.querySelectorAll('.page-container').forEach(el => el.classList.remove('selected'));
+          this.classList.add('selected');
+          selectedPage = parseInt(this.dataset.pageNumber);
+          document.getElementById('extractBtn').disabled = false;
+        };
+      }
+    }
+
+    async function extractTable() {
+      if (!selectedPage || !pdfDoc) return alert("Sélectionnez une page.");
+
+      const page = await pdfDoc.getPage(selectedPage);
+      const content = await page.getTextContent();
+      const items = content.items;
+
+      let rowsMap = {};
+      items.forEach(item => {
+        const y = Math.floor(item.transform[5]);
+        const x = item.transform[4];
+        const text = item.str.trim();
+        if (!rowsMap[y]) rowsMap[y] = [];
+        rowsMap[y].push({ x, text });
+      });
+
+      const sortedYs = Object.keys(rowsMap).sort((a, b) => b - a);
+      let lines = [];
+      for (let y of sortedYs) {
+        const row = rowsMap[y]
+          .sort((a, b) => a.x - b.x)
+          .map(cell => cell.text)
+          .filter(cell => cell !== "");
+        if (row.length > 0) lines.push(row);
+      }
+
+      extractedTable = lines.filter(row => row.length >= 3);
+      document.getElementById('output').textContent = JSON.stringify(extractedTable, null, 2);
+      alert("✅ Extraction de la page " + selectedPage + " terminée !");
     }
 
     function downloadExcel() {
-      if (extractedTable.length === 0) {
-        return alert("Aucun tableau extrait.");
-      }
+      if (extractedTable.length === 0) return alert("Aucun tableau extrait.");
 
       const worksheet = XLSX.utils.aoa_to_sheet(extractedTable);
       const workbook = XLSX.utils.book_new();
