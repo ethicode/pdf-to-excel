@@ -196,45 +196,23 @@
       let rowsMap = {};
       items.forEach(item => {
         const y = Math.floor(item.transform[5]);
-        const x = Math.round(item.transform[4]);
+        const x = item.transform[4];
         const text = item.str.trim();
         if (!rowsMap[y]) rowsMap[y] = [];
         rowsMap[y].push({ x, text });
       });
 
       const sortedYs = Object.keys(rowsMap).sort((a, b) => b - a);
-      let allXs = new Set();
+      let lines = [];
+      for (let y of sortedYs) {
+        const row = rowsMap[y]
+          .sort((a, b) => a.x - b.x)
+          .map(cell => cell.text)
+          .filter(cell => cell !== "");
+        if (row.length > 0) lines.push(row);
+      }
 
-      // Collecte des positions x
-      sortedYs.forEach(y => {
-        rowsMap[y].forEach(cell => allXs.add(cell.x));
-      });
-
-      const sortedXs = Array.from(allXs).sort((a, b) => a - b);
-
-      const lines = sortedYs.map(y => {
-        const row = Array(sortedXs.length).fill("");
-        rowsMap[y].forEach(cell => {
-          let minDiff = Infinity;
-          let colIndex = -1;
-          sortedXs.forEach((colX, idx) => {
-            const diff = Math.abs(cell.x - colX);
-            if (diff < minDiff) {
-              minDiff = diff;
-              colIndex = idx;
-            }
-          });
-
-          if (row[colIndex]) {
-            row[colIndex] += "\n" + cell.text;
-          } else {
-            row[colIndex] = cell.text;
-          }
-        });
-        return row;
-      });
-
-      extractedTable = lines;
+      extractedTable = lines.filter(row => row.length >= 3);
       document.getElementById('output').textContent = JSON.stringify(extractedTable, null, 2);
       alert("✅ Extraction de la page " + selectedPage + " terminée !");
     }
